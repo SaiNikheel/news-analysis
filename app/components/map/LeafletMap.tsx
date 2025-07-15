@@ -2,16 +2,14 @@
 
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import { CrimeIncident } from '@/lib/types';
+import { IncidentMapMarker } from '@/lib/types';
 
 interface LeafletMapProps {
-  center: {
-    lat: number;
-    lng: number;
-  };
-  incidents: CrimeIncident[];
+  center: [number, number];
+  incidents: IncidentMapMarker[];
   style?: React.CSSProperties;
   zoom?: number;
+  onIncidentClick?: (incidentId: string) => void;
 }
 
 export default function LeafletMap({
@@ -19,10 +17,11 @@ export default function LeafletMap({
   incidents,
   style,
   zoom = 12,
+  onIncidentClick,
 }: LeafletMapProps) {
   return (
     <MapContainer
-      center={[center.lat, center.lng]}
+      center={center}
       zoom={zoom}
       style={style}
       className="rounded-lg"
@@ -41,6 +40,13 @@ export default function LeafletMap({
           weight={1}
           opacity={0.8}
           fillOpacity={0.6}
+          eventHandlers={{
+            click: () => {
+              if (onIncidentClick) {
+                onIncidentClick(incident.id);
+              }
+            },
+          }}
         >
           <Popup>
             <div className="text-sm">
@@ -48,10 +54,16 @@ export default function LeafletMap({
               <p className="text-gray-600">
                 {new Date(incident.publishedDate).toLocaleDateString()}
               </p>
-              {incident.involvedPersonsRole && (
-                <p className="text-gray-500">
-                  Role: {incident.involvedPersonsRole}
-                </p>
+              <p className="text-gray-500 mt-1">
+                {incident.location}
+              </p>
+              {onIncidentClick && (
+                <button
+                  onClick={() => onIncidentClick(incident.id)}
+                  className="mt-2 px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
+                >
+                  View Details
+                </button>
               )}
             </div>
           </Popup>

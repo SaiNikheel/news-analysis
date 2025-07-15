@@ -2,11 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { CrimeIncident, DashboardFilters, InsightSummary } from '@/lib/types';
+import { IncidentSummary, DashboardFilters, InsightSummary } from '@/lib/types';
 import { LightBulbIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
 
 interface InsightPanelProps {
-  incidents: CrimeIncident[];
+  incidents: IncidentSummary[];
   filters: DashboardFilters;
 }
 

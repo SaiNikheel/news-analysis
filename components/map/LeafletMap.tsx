@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { MapContainer, TileLayer, CircleMarker, useMap } from 'react-leaflet';
-import { CrimeIncident } from '@/lib/types';
-import IncidentDetails from './IncidentDetails';
+import { IncidentMapMarker, IncidentDetails } from '@/lib/types';
+import IncidentDetailsPanel from './IncidentDetails';
 import { PlusIcon, MinusIcon } from '@heroicons/react/24/outline';
 
 // Import Leaflet CSS only on client-side
@@ -38,10 +38,12 @@ function ZoomControls() {
 interface LeafletMapProps {
   center: [number, number];
   zoom?: number;
-  incidents?: Partial<CrimeIncident>[];
+  incidents?: IncidentMapMarker[];
   style?: React.CSSProperties;
   onIncidentOpen?: () => void;
   onIncidentClose?: () => void;
+  onIncidentClick?: (incidentId: string) => void;
+  selectedIncidentDetails?: IncidentDetails | null;
 }
 
 export default function LeafletMap({ 
@@ -51,9 +53,10 @@ export default function LeafletMap({
   style = { height: '100%', width: '100%', minHeight: '400px' },
   onIncidentOpen,
   onIncidentClose,
+  onIncidentClick,
+  selectedIncidentDetails,
 }: LeafletMapProps) {
   const [mount, setMount] = useState(false);
-  const [selectedIncident, setSelectedIncident] = useState<Partial<CrimeIncident> | null>(null);
 
   // Only render map on client-side
   useEffect(() => {
@@ -62,10 +65,10 @@ export default function LeafletMap({
 
   // Handle incident open/close callbacks
   useEffect(() => {
-    if (selectedIncident && onIncidentOpen) onIncidentOpen();
-    if (!selectedIncident && onIncidentClose) onIncidentClose();
+    if (selectedIncidentDetails && onIncidentOpen) onIncidentOpen();
+    if (!selectedIncidentDetails && onIncidentClose) onIncidentClose();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedIncident]);
+  }, [selectedIncidentDetails]);
 
   if (!mount) {
     return (
@@ -90,7 +93,7 @@ export default function LeafletMap({
   }
 
   return (
-    <div className={`relative w-full h-full transition-all duration-300 ${selectedIncident ? 'ml-96' : ''}`}>
+    <div className={`relative w-full h-full transition-all duration-300 ${selectedIncidentDetails ? 'ml-96' : ''}`}>
       <MapContainer
         center={mapCenter}
         zoom={zoom}
@@ -106,7 +109,7 @@ export default function LeafletMap({
           if (!incident.latitude || !incident.longitude || !incident.newsType) return null;
           
           const { color, category } = getColorByType(incident.newsType);
-          const isSelected = selectedIncident?.id === incident.id;
+          const isSelected = selectedIncidentDetails?.id === incident.id;
 
           return (
             <CircleMarker
@@ -121,7 +124,9 @@ export default function LeafletMap({
               }}
               eventHandlers={{
                 click: () => {
-                  setSelectedIncident(incident);
+                  if (onIncidentClick && incident.id) {
+                    onIncidentClick(incident.id);
+                  }
                 },
                 mouseover: (e) => {
                   e.target.setRadius(12);
@@ -131,7 +136,7 @@ export default function LeafletMap({
                   });
                 },
                 mouseout: (e) => {
-                  if (selectedIncident?.id !== incident.id) {
+                  if (selectedIncidentDetails?.id !== incident.id) {
                     e.target.setRadius(8);
                     e.target.setStyle({
                       fillOpacity: 0.7,
@@ -149,9 +154,11 @@ export default function LeafletMap({
       </MapContainer>
 
       {/* Side Panel for Incident Details */}
-      <IncidentDetails
-        incident={selectedIncident}
-        onClose={() => setSelectedIncident(null)}
+      <IncidentDetailsPanel
+        incident={selectedIncidentDetails ?? null}
+        onClose={() => {
+          if (onIncidentClose) onIncidentClose();
+        }}
       />
 
       {/* Legend */}
@@ -228,24 +235,24 @@ function getColorByType(type: string): { color: string, category: string } {
     return { color: '#6366f1', category: 'Political' };
   }
   
-  // Accidents & hazards - Amber
-  if (['accident', 'fatal accident', 'road accident', 'health hazard',
-       'medical malpractice', 'utility failure', 'drunk and drive'].includes(typeClean)) {
+  // Accidents/Hazards - Yellow
+  if (['accident', 'fire', 'explosion', 'natural disaster', 'infrastructure failure',
+       'transportation accident', 'industrial accident'].includes(typeClean)) {
     return { color: '#f59e0b', category: 'Accident/Hazard' };
   }
   
   // Community issues - Green
-  if (['child labor', 'municipal issues', 'local development', 'village news',
-       'farmer issues', 'social awareness', 'inspection'].includes(typeClean)) {
+  if (['community development', 'public health', 'education', 'environmental issue',
+       'social welfare', 'public safety', 'infrastructure'].includes(typeClean)) {
     return { color: '#10b981', category: 'Community Issue' };
   }
   
-  // Cultural/Social events - Pink
-  if (['festival', 'cultural program', 'sports event', 'awards and achievements',
-       'sympathy and condolence'].includes(typeClean)) {
+  // Cultural/Social - Pink
+  if (['cultural event', 'social issue', 'entertainment', 'sports', 'arts',
+       'festival', 'celebration', 'social movement'].includes(typeClean)) {
     return { color: '#ec4899', category: 'Cultural/Social' };
   }
   
-  // Others - Gray
+  // Default - Gray
   return { color: '#6b7280', category: 'Other' };
 } 

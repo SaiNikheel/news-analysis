@@ -16,10 +16,9 @@ import {
   Tooltip,
   Legend,
 } from 'chart.js';
-import { CrimeIncident, DashboardFilters } from '@/lib/types';
-import OverviewCard from '@/components/dashboard/OverviewCard';
-import InsightPanel from '@/components/dashboard/InsightPanel';
-import MapPreview from '@/components/dashboard/MapPreview';
+import { IncidentSummary, DashboardFilters, IncidentDetails } from '@/lib/types';
+import OverviewCard from '../components/dashboard/OverviewCard';
+import InsightPanel from '../components/dashboard/InsightPanel';
 import { useAnalytics } from '@/lib/hooks/useAnalytics';
 
 // Register ChartJS components
@@ -38,86 +37,107 @@ ChartJS.register(
 export default function DashboardPage() {
   const { data: session } = useSession();
   const { trackEvent } = useAnalytics();
-  const [incidents, setIncidents] = useState<CrimeIncident[]>([]);
+  const [incidents, setIncidents] = useState<IncidentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [timeframe, setTimeframe] = useState<'week'|'month'|'year'>('month');
   const [filters, setFilters] = useState<DashboardFilters | null>(null);
+  const [selectedIncidentDetails, setSelectedIncidentDetails] = useState<IncidentDetails | null>(null);
 
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchIncidentSummaries = async () => {
       setLoading(true);
-      try {
-        const response = await fetch('/api/incidents');
+      let allIncidents: IncidentSummary[] = [];
+      let page = 1;
+      const pageSize = 1000;
+      let hasMore = true;
+      while (hasMore) {
+        const response = await fetch(`/api/incidents/summary?page=${page}&pageSize=${pageSize}`);
         const data = await response.json();
-        setIncidents(Array.isArray(data) ? data : []);
-      } catch (error) {
-        console.error('Error fetching incidents:', error);
-        setIncidents([]);
+        if (data.incidents && data.incidents.length > 0) {
+          allIncidents = allIncidents.concat(data.incidents);
+          hasMore = data.hasMore;
+          page++;
+        } else {
+          hasMore = false;
+        }
       }
+      setIncidents(allIncidents);
       setLoading(false);
+      console.log('Loaded incident summaries:', allIncidents.length);
     };
-
-    fetchData();
+    fetchIncidentSummaries();
   }, []);
 
-  // Update filters whenever timeframe or incidents change
-  useEffect(() => {
+  // Remove all filtering, just use all incidents
+  const recentIncidents = incidents;
+  const totalIncidents = incidents.length;
+  
+  // Filter incidents by selected timeframe
+  const getFilteredIncidents = (timeframe: 'week'|'month'|'year') => {
     const now = new Date();
-    let start = new Date();
-    const end = new Date(now); // End date is always now
-
-    switch(timeframe) {
+    const startDate = new Date();
+    
+    switch (timeframe) {
       case 'week':
-        start.setDate(now.getDate() - 7);
+        startDate.setDate(now.getDate() - 7);
         break;
       case 'month':
-        start.setMonth(now.getMonth() - 1);
+        startDate.setMonth(now.getMonth() - 1);
         break;
       case 'year':
-        start.setFullYear(now.getFullYear() - 1);
+        startDate.setFullYear(now.getFullYear() - 1);
         break;
     }
-
-    // Set the filters state (add crimeType later if needed)
-    setFilters({
-      dateRange: [start, end],
-      // crimeType: undefined // Initialize if you add crime type filter
-    });
-
-  }, [timeframe, incidents]); // Depend on timeframe and incidents (to ensure it runs after data loads)
-
-  // Get recent incidents based on timeframe
-  const getRecentIncidents = () => {
-    if (!filters || !filters.dateRange) return []; // Guard clause
-    const [start, end] = filters.dateRange;
-
-    // Ensure start and end are valid dates before filtering
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-        console.warn("Invalid date range in filters");
-        return [];
-    }
-
+    
     return incidents.filter(incident => {
-        try {
-            const incidentDate = new Date(incident.publishedDate);
-            return !isNaN(incidentDate.getTime()) && incidentDate >= start && incidentDate <= end;
-        } catch (e) {
-            console.warn(`Failed to parse date for incident ${incident.id}: ${incident.publishedDate}`);
-            return false;
-        }
+      const incidentDate = new Date(incident.publishedDate);
+      return incidentDate >= startDate && incidentDate <= now;
     });
   };
-
-  const recentIncidents = getRecentIncidents();
+  
+  const filteredIncidents = getFilteredIncidents(timeframe);
+  const recentIncidentsCount = filteredIncidents.length;
+  
+  // Calculate rate change (comparing to previous period)
+  const getPreviousPeriodCount = (timeframe: 'week'|'month'|'year') => {
+    const now = new Date();
+    const endDate = new Date();
+    const startDate = new Date();
+    
+    switch (timeframe) {
+      case 'week':
+        endDate.setDate(now.getDate() - 7);
+        startDate.setDate(now.getDate() - 14);
+        break;
+      case 'month':
+        endDate.setMonth(now.getMonth() - 1);
+        startDate.setMonth(now.getMonth() - 2);
+        break;
+      case 'year':
+        endDate.setFullYear(now.getFullYear() - 1);
+        startDate.setFullYear(now.getFullYear() - 2);
+        break;
+    }
+    
+    return incidents.filter(incident => {
+      const incidentDate = new Date(incident.publishedDate);
+      return incidentDate >= startDate && incidentDate <= endDate;
+    }).length;
+  };
+  
+  const previousPeriodCount = getPreviousPeriodCount(timeframe);
+  const rateChange = previousPeriodCount > 0 
+    ? Math.round(((recentIncidentsCount - previousPeriodCount) / previousPeriodCount) * 100)
+    : 0;
 
   // Prepare data for charts
-  const incidentsByMonth = incidents.reduce((acc: Record<string, number>, incident: CrimeIncident) => {
+  const incidentsByMonth = filteredIncidents.reduce((acc: Record<string, number>, incident: IncidentSummary) => {
     const month = new Date(incident.publishedDate).toLocaleString('default', { month: 'short' });
     acc[month] = (acc[month] || 0) + 1;
     return acc;
   }, {});
 
-  const crimeTypes = incidents.reduce((acc: Record<string, number>, incident: CrimeIncident) => {
+  const crimeTypes = filteredIncidents.reduce((acc: Record<string, number>, incident: IncidentSummary) => {
     acc[incident.newsType] = (acc[incident.newsType] || 0) + 1;
     return acc;
   }, {});
@@ -127,8 +147,8 @@ export default function DashboardPage() {
     .slice(0, 5);
 
   // Group by locations for hotspot analysis
-  const locationCounts = incidents.reduce((acc: Record<string, number>, incident: CrimeIncident) => {
-    const locationKey = incident.location || `${incident.latitude.toFixed(4)},${incident.longitude.toFixed(4)}`;
+  const locationCounts = filteredIncidents.reduce((acc: Record<string, number>, incident: IncidentSummary) => {
+    const locationKey = incident.location || 'Unknown Location';
     acc[locationKey] = (acc[locationKey] || 0) + 1;
     return acc;
   }, {});
@@ -138,7 +158,7 @@ export default function DashboardPage() {
     .slice(0, 5);
 
   // Count by time of day for temporal analysis
-  const timeOfDayCounts = incidents.reduce((acc: Record<string, number>, incident: CrimeIncident) => {
+  const timeOfDayCounts = filteredIncidents.reduce((acc: Record<string, number>, incident: IncidentSummary) => {
     let hour = 0;
     try {
       const date = new Date(incident.publishedDate);
@@ -158,42 +178,29 @@ export default function DashboardPage() {
     return acc;
   }, {});
 
-  const totalIncidents = incidents.length;
-  const recentIncidentsCount = recentIncidents.length;
-  
-  // Calculate rate change
-  const previousPeriodCount = incidents.filter(incident => {
-    const date = new Date(incident.publishedDate);
-    const now = new Date();
-    const cutoff = new Date();
-    const previousCutoff = new Date();
-    
-    switch(timeframe) {
-      case 'week':
-        cutoff.setDate(now.getDate() - 7);
-        previousCutoff.setDate(cutoff.getDate() - 7);
-        break;
-      case 'month':
-        cutoff.setMonth(now.getMonth() - 1);
-        previousCutoff.setMonth(cutoff.getMonth() - 1);
-        break;
-      case 'year':
-        cutoff.setFullYear(now.getFullYear() - 1);
-        previousCutoff.setFullYear(cutoff.getFullYear() - 1);
-        break;
-    }
-    
-    return date >= previousCutoff && date < cutoff;
-  }).length;
-  
-  const rateChange = previousPeriodCount > 0 
-    ? Math.round((recentIncidentsCount - previousPeriodCount) / previousPeriodCount * 100) 
-    : 0;
-
   // Track timeframe changes
   const handleTimeframeChange = (newTimeframe: 'week'|'month'|'year') => {
     setTimeframe(newTimeframe);
     trackEvent('timeframe_change', { timeframe: newTimeframe });
+  };
+
+  // Handle incident click to show details
+  const handleIncidentClick = async (incidentId: string) => {
+    try {
+      const response = await fetch(`/api/incidents/${incidentId}`);
+      if (response.ok) {
+        const details = await response.json();
+        setSelectedIncidentDetails(details);
+      } else {
+        console.error('Failed to fetch incident details');
+      }
+    } catch (error) {
+      console.error('Error fetching incident details:', error);
+    }
+  };
+
+  const handleIncidentClose = () => {
+    setSelectedIncidentDetails(null);
   };
 
   return (
@@ -244,7 +251,7 @@ export default function DashboardPage() {
         <OverviewCard
           title="Total Incidents"
           value={totalIncidents}
-          trend={null}
+          trend={undefined}
           loading={loading}
         />
         <OverviewCard
@@ -408,24 +415,246 @@ export default function DashboardPage() {
         </motion.div>
       </div>
 
-      {/* Map Preview and AI Insights Side-by-Side */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8">
-         {/* Map Preview - Occupies 2 columns on large screens */}
-         <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.3 }} className="lg:col-span-2">
-            <MapPreview incidents={recentIncidents} />
-         </motion.div>
-
-         {/* AI Insights Panel - Occupies 1 column on large screens */}
-         <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.4 }} className="lg:col-span-1">
-            {filters ? (
-              <InsightPanel incidents={recentIncidents} filters={filters} />
-            ) : (
-              <div className="bg-white rounded-lg shadow p-6 text-center text-gray-500">
-                 Select filters to generate insights.
+      {/* Recent Incidents Section */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.2 }}
+        className="bg-white rounded-lg shadow p-6 mb-8"
+      >
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-xl font-semibold">Recent Incidents</h2>
+          <span className="text-sm text-gray-500">
+            Showing {Math.min(filteredIncidents.length, 10)} of {filteredIncidents.length} incidents
+          </span>
+        </div>
+        
+        <div className="grid gap-4">
+          {filteredIncidents.slice(0, 10).map((incident) => (
+            <div
+              key={incident.id}
+              className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors cursor-pointer"
+              onClick={() => handleIncidentClick(incident.id)}
+            >
+              <div className="flex justify-between items-start">
+                <div className="flex-1">
+                  <h3 className="font-medium text-gray-900 line-clamp-2 mb-2">
+                    {incident.title}
+                  </h3>
+                  <div className="flex items-center gap-3 text-sm text-gray-600">
+                    <span className="flex items-center">
+                      <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      {incident.location || 'Unknown Location'}
+                    </span>
+                    <span className="flex items-center">
+                      <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                      {new Date(incident.publishedDate).toLocaleDateString()}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                    {incident.newsType}
+                  </span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleIncidentClick(incident.id);
+                    }}
+                    className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                  >
+                    View Details →
+                  </button>
+                </div>
               </div>
-            )}
-         </motion.div>
-      </div>
+            </div>
+          ))}
+        </div>
+        
+        {filteredIncidents.length > 10 && (
+          <div className="mt-6 text-center">
+            <p className="text-sm text-gray-500">
+              Showing first 10 incidents. Use the map page to explore all incidents.
+            </p>
+          </div>
+        )}
+      </motion.div>
+      
+      {/* Incident Details Modal */}
+      {selectedIncidentDetails && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex justify-between items-start mb-4">
+                <h2 className="text-xl font-bold text-gray-900">Incident Details</h2>
+                <button
+                  onClick={handleIncidentClose}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                    {selectedIncidentDetails.title}
+                  </h3>
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                      {selectedIncidentDetails.newsType}
+                    </span>
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                      {new Date(selectedIncidentDetails.publishedDate).toLocaleDateString()}
+                    </span>
+                    {selectedIncidentDetails.location && (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                        📍 {selectedIncidentDetails.location}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                
+                {selectedIncidentDetails.description && (
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-2">Description</h4>
+                    <p className="text-gray-700 text-sm leading-relaxed">
+                      {selectedIncidentDetails.description}
+                    </p>
+                  </div>
+                )}
+                
+                {selectedIncidentDetails.involvedPersonsRole && (
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-2">Involved Persons Role</h4>
+                    <p className="text-gray-700 text-sm">
+                      {selectedIncidentDetails.involvedPersonsRole}
+                    </p>
+                  </div>
+                )}
+                
+                {selectedIncidentDetails.impact && (
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-2">Impact</h4>
+                    <p className="text-gray-700 text-sm">
+                      {selectedIncidentDetails.impact}
+                    </p>
+                  </div>
+                )}
+                
+                {selectedIncidentDetails.source && (
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-2">Source</h4>
+                    <p className="text-gray-700 text-sm">
+                      {selectedIncidentDetails.source}
+                    </p>
+                  </div>
+                )}
+                
+                {selectedIncidentDetails.sourceUrl && (
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-2">Source URL</h4>
+                    <a
+                      href={selectedIncidentDetails.sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:text-blue-800 text-sm break-all"
+                    >
+                      {selectedIncidentDetails.sourceUrl}
+                    </a>
+                  </div>
+                )}
+                
+                {selectedIncidentDetails.keywords && selectedIncidentDetails.keywords.length > 0 && (
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-2">Keywords</h4>
+                    <div className="flex flex-wrap gap-1">
+                      {selectedIncidentDetails.keywords.map((keyword, index) => (
+                        <span
+                          key={index}
+                          className="inline-flex items-center px-2 py-1 rounded text-xs bg-gray-100 text-gray-700"
+                        >
+                          {keyword}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {selectedIncidentDetails.quotes && (
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-2">Quotes</h4>
+                    <blockquote className="border-l-4 border-gray-300 pl-4 italic text-gray-700 text-sm">
+                      {selectedIncidentDetails.quotes}
+                    </blockquote>
+                  </div>
+                )}
+                
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  {selectedIncidentDetails.tone && (
+                    <div>
+                      <span className="font-medium text-gray-900">Tone:</span>
+                      <span className="ml-2 text-gray-700">{selectedIncidentDetails.tone}</span>
+                    </div>
+                  )}
+                  {selectedIncidentDetails.category && (
+                    <div>
+                      <span className="font-medium text-gray-900">Category:</span>
+                      <span className="ml-2 text-gray-700">{selectedIncidentDetails.category}</span>
+                    </div>
+                  )}
+                  {selectedIncidentDetails.dayOfWeek && (
+                    <div>
+                      <span className="font-medium text-gray-900">Day:</span>
+                      <span className="ml-2 text-gray-700">{selectedIncidentDetails.dayOfWeek}</span>
+                    </div>
+                  )}
+                  {selectedIncidentDetails.date_time && (
+                    <div>
+                      <span className="font-medium text-gray-900">Date/Time:</span>
+                      <span className="ml-2 text-gray-700">{selectedIncidentDetails.date_time}</span>
+                    </div>
+                  )}
+                </div>
+                
+                {selectedIncidentDetails.publicReaction && (
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-2">Public Reaction</h4>
+                    <p className="text-gray-700 text-sm">
+                      {selectedIncidentDetails.publicReaction}
+                    </p>
+                  </div>
+                )}
+                
+                {selectedIncidentDetails.futureImplications && (
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-2">Future Implications</h4>
+                    <p className="text-gray-700 text-sm">
+                      {selectedIncidentDetails.futureImplications}
+                    </p>
+                  </div>
+                )}
+              </div>
+              
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={handleIncidentClose}
+                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 } 

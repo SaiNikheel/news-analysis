@@ -1,11 +1,11 @@
 'use client';
 
-import { CrimeIncident } from '@/lib/types';
+import { IncidentDetails as IncidentDetailsType } from '@/lib/types';
 import { XMarkIcon } from '@heroicons/react/24/outline';
 import { CalendarIcon, MapPinIcon, NewspaperIcon, TagIcon } from '@heroicons/react/24/outline';
 
 interface IncidentDetailsProps {
-  incident: Partial<CrimeIncident> | null;
+  incident: IncidentDetailsType | null;
   onClose: () => void;
 }
 

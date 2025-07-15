@@ -1,34 +1,19 @@
 import { NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase';
-import { DashboardFilters, CrimeIncident } from '@/lib/types';
+import { DashboardFilters, IncidentMapMarker } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
-// Transform database response from snake_case to camelCase
-function transformIncident(dbIncident: any): CrimeIncident {
+// Transform database response to map marker format
+function transformToMapMarker(dbIncident: any): IncidentMapMarker {
   return {
     id: dbIncident.id,
     title: dbIncident.title,
-    description: dbIncident.description,
-    publishedDate: dbIncident.published_date,
     latitude: dbIncident.latitude,
     longitude: dbIncident.longitude,
     newsType: dbIncident.news_type,
-    involvedPersonsRole: dbIncident.involved_persons_role,
     location: dbIncident.location,
-    keywords: dbIncident.keywords,
-    impact: dbIncident.impact,
-    source: dbIncident.source,
-    sourceUrl: dbIncident.source_url,  // Add source URL mapping
-    date_time: dbIncident.date_time,
-    tone: dbIncident.tone,
-    quotes: dbIncident.quotes,
-    publicReaction: dbIncident.public_reaction,
-    pastEvents: dbIncident.past_events,
-    futureImplications: dbIncident.future_implications,
-    mainSubject: dbIncident.main_subject,
-    dayOfWeek: dbIncident.day_of_week,
-    imagesAndMedia: dbIncident.images_and_media,
+    publishedDate: dbIncident.published_date,
   };
 }
 
@@ -40,7 +25,7 @@ export async function GET(request: Request) {
     const crimeType = searchParams.get('crimeType');
     const status = searchParams.get('status');
     const page = parseInt(searchParams.get('page') || '1');
-    const pageSize = parseInt(searchParams.get('pageSize') || '50');
+    const pageSize = parseInt(searchParams.get('pageSize') || '1000');
 
     const filters: Partial<DashboardFilters> = {};
     if (startDate && endDate) {
@@ -55,9 +40,10 @@ export async function GET(request: Request) {
 
     const supabase = createServerSupabaseClient();
     
+    // Select only the fields needed for map markers
     let query = supabase
       .from('incidents')
-      .select('*', { count: 'exact' });
+      .select('id, title, latitude, longitude, news_type, location, published_date', { count: 'exact' });
 
     // Apply filters
     if (filters.dateRange) {
@@ -85,51 +71,22 @@ export async function GET(request: Request) {
     if (error) {
       console.error('Supabase query error:', error);
       return NextResponse.json(
-        { error: 'Failed to load incidents data', details: error.message },
+        { error: 'Failed to load map markers', details: error.message },
         { status: 500 }
       );
     }
 
     return NextResponse.json({
-      incidents: (data || []).map(transformIncident),
+      incidents: (data || []).map(transformToMapMarker),
       total: count || 0,
       hasMore: (count || 0) > to + 1,
       page,
       pageSize
     });
   } catch (error) {
-    console.error('Error fetching incidents:', error);
+    console.error('Error fetching map markers:', error);
     return NextResponse.json(
-      { error: 'Failed to load incidents data', details: String(error) },
-      { status: 500 }
-    );
-  }
-}
-
-export async function POST(request: Request) {
-  try {
-    const incidentData = await request.json();
-    const supabase = createServerSupabaseClient();
-    
-    const { data, error } = await supabase
-      .from('incidents')
-      .insert([incidentData])
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Error adding incident:', error);
-      return NextResponse.json(
-        { error: 'Failed to add incident', details: error.message },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json(data);
-  } catch (error) {
-    console.error('Error adding incident:', error);
-    return NextResponse.json(
-      { error: 'Failed to add incident', details: String(error) },
+      { error: 'Failed to load map markers', details: String(error) },
       { status: 500 }
     );
   }
